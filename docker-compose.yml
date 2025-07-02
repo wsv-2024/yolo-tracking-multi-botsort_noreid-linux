@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     shm_size: 32g
-    image: yolo-tracking-multi-image
-    container_name: yolo11-tracking-multi-container
+    image: yolo-multi-botsort-single-linux
+    container_name: yolo-multi-botsort-single-linux
 
     deploy:
       resources:
