@@ -1,0 +1,33 @@
+services:
+  yolo-tracking:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    shm_size: 32g
+    image: yolo-tracking-multi-image
+    container_name: yolo11-tracking-multi-container
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    volumes:
+      - /home/active_location.txt:/app/active_location.txt:ro
+      - ./saved_data:/app/saved_data
+      - /etc/localtime:/etc/localtime:ro
+      # Mount the X11 socket so GUI calls can reach the host display:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+
+    environment:
+      - TERM=xterm-256color
+      - OUTPUT_PATH=/app/saved_data
+      # Forward the same DISPLAY variable from your host environment:
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+
+    restart: always

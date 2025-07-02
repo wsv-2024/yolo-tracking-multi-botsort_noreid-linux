@@ -1,0 +1,17 @@
+azure-storage-blob
+lap
+pandas
+torch
+numpy<2
+easyocr
+torchvision
+configparser
+
+# Zusätzliche Dependencies für erweiterte OCR
+# opencv-python-headless>=4.5.0
+scikit-image>=0.19.0
+matplotlib>=3.5.0
+
+# Optional für bessere Performance
+# cupy-cuda11x  # Für CUDA 11.x GPU-Beschleunigung
+# cupy-cuda12x  # Für CUDA 12.x GPU-Beschleunigung
