@@ -1,4 +1,5 @@
 import os
+import shutil
 import datetime
 from azure.storage.blob import BlobServiceClient
 from datetime import timezone
@@ -8,9 +9,9 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from image_utils import sanitize_filename
 
+# Using Windows version Azure Storage Account Key
 AZURE_STORAGE_CONNECTION_STRING = (
-    "DefaultEndpointsProtocol=https;AccountName=wsv3storage;AccountKey=3JjCkbAaCZE18ikMLfNYOh7XRrXXk7ikUc0TNanUV8LvLCxi1+E9fJ3YPzfNcUo/"
-    "x2idKQaeAhMa+AStlbSYYA==;EndpointSuffix=core.windows.net"
+    "DefaultEndpointsProtocol=https;AccountName=wsv3storage;AccountKey=8ji24i7wR+wHkajFbtLYIJ/rVtvBnh64F0r4ECvVpitn0oHWEMZTkB0ou7JWijk46HZUmaB9d/o0+AStWtJ9oA==;EndpointSuffix=core.windows.net"
 )
 CONTAINER_NAME = "wsv3"
 
@@ -30,194 +31,193 @@ LOCATION = get_active_location()
 local_directory_csv = f"saved_data/{LOCATION}/csv"
 local_directory_events = f"saved_data/{LOCATION}/events"
 
+# Backup directories
+backup_directory_csv = f"saved_data/{LOCATION}/csv_backup"
+backup_directory_events = f"saved_data/{LOCATION}/events_backup"
+
 # Updated blob directories according to requirements
 blob_directory_csv = "CSV_output/Yolo_Multi/"
 blob_directory_events = "model-inputs/Yolo-Multi/"
 
 
+def list_existing_blobs(connection_string, container_name, blob_directory):
+    """Fetches all blob names in a specific directory on Azure."""
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    container_client = blob_service_client.get_container_client(container_name)
+    blobs = container_client.list_blobs(name_starts_with=blob_directory)
+    return set(os.path.basename(blob.name) for blob in blobs)
+
+
+def list_existing_event_blobs(connection_string, container_name, blob_directory):
+    """Fetches all event directory names and their files from Azure."""
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    container_client = blob_service_client.get_container_client(container_name)
+    blobs = container_client.list_blobs(name_starts_with=blob_directory)
+    
+    event_files = {}
+    for blob in blobs:
+        # Extract event name and filename from blob path
+        # Format: "model-inputs/Yolo-Multi/event_name/filename"
+        blob_path = blob.name
+        if blob_path.count('/') >= 2:
+            parts = blob_path.split('/')
+            event_name = parts[2]  # event directory name
+            filename = parts[3] if len(parts) > 3 else ""
+            
+            if event_name not in event_files:
+                event_files[event_name] = set()
+            if filename:
+                event_files[event_name].add(filename)
+    
+    return event_files
+
+
 def upload_to_azure_blob(connection_string, container_name, blob_name, file_path):
-    try:
-        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        container_client = blob_service_client.get_container_client(container_name)
-
-        blob_client = container_client.get_blob_client(blob_name)
-
-        with open(file_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
-
-        print(f"File '{file_path}' uploaded as '{blob_name}'.")
-    except Exception as ex:
-        print(f"Error uploading file '{file_path}': {ex}")
-
-
-def extract_location(filename):
-    try:
-        return filename.split("_")[2]  # Annahme: '20250306_121218_Diemitz_motorboat...'
-    except IndexError:
-        return "unknown"
-
-
-def get_latest_blob_timestamp_by_location(connection_string, container_name, blob_directory, location):
+    """Upload file to Azure Blob with overwrite=False (Windows version strategy)."""
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
     container_client = blob_service_client.get_container_client(container_name)
-
-    latest_blob_time = None
-
-    for blob in container_client.list_blobs(name_starts_with=blob_directory):
-        blob_name = os.path.basename(blob.name)
-        blob_location = extract_location(blob_name)
-
-        if blob_location == location:
-            blob_time = blob.last_modified
-            if latest_blob_time is None or blob_time > latest_blob_time:
-                latest_blob_time = blob_time
-
-    return latest_blob_time
-
-
-def find_new_files(directory, file_extension, connection_string, container_name, blob_directory):
-    new_files = []
+    blob_client = container_client.get_blob_client(blob_name)
     
-    # Check if directory exists
-    if not os.path.exists(directory):
-        print(f"Directory {directory} does not exist, skipping...")
-        return new_files
+    with open(file_path, "rb") as data:
+        blob_client.upload_blob(data, overwrite=False)
+    print(f"[{datetime.datetime.now()}] Uploaded: {file_path} → {blob_name}")
 
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
 
-        if filename.endswith(file_extension) and os.path.isfile(file_path):
-            location = extract_location(filename)
-            latest_blob_time = get_latest_blob_timestamp_by_location(
-                connection_string, container_name, blob_directory, location
+def process_csv_files(local_directory, blob_directory, backup_directory, existing_blobs):
+    """Process CSV files using Windows version strategy."""
+    if not os.path.exists(local_directory):
+        print(f"CSV directory {local_directory} does not exist, skipping...")
+        return
+    
+    os.makedirs(backup_directory, exist_ok=True)
+    
+    for filename in os.listdir(local_directory):
+        if not filename.endswith(".csv"):
+            continue
+        
+        local_path = os.path.join(local_directory, filename)
+        if not os.path.isfile(local_path):
+            continue
+        
+        if filename in existing_blobs:
+            print(f"[{datetime.datetime.now()}] Skipping {filename} - already exists in blob")
+            continue  # Already uploaded
+
+        blob_name = blob_directory + filename
+        try:
+            upload_to_azure_blob(
+                AZURE_STORAGE_CONNECTION_STRING,
+                CONTAINER_NAME,
+                blob_name,
+                local_path,
             )
-
-            file_modified_time = datetime.datetime.fromtimestamp(
-                os.path.getmtime(file_path)
-            ).replace(tzinfo=timezone.utc)
-
-            if latest_blob_time is None or file_modified_time > latest_blob_time:
-                new_files.append(file_path)
-
-    return new_files
+            # Move to backup folder
+            backup_path = os.path.join(backup_directory, filename)
+            shutil.move(local_path, backup_path)
+            print(f"[{datetime.datetime.now()}] Moved {filename} to backup")
+        except Exception as ex:
+            print(f"[{datetime.datetime.now()}] Failed to upload {local_path}: {ex}")
 
 
-def get_latest_event_blob_timestamp(connection_string, container_name, blob_directory, event_name):
-    """Get the latest timestamp of any file in an event directory from the blob."""
-    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-    container_client = blob_service_client.get_container_client(container_name)
-
-    latest_blob_time = None
-    event_blob_prefix = f"{blob_directory}{event_name}/"
-
-    for blob in container_client.list_blobs(name_starts_with=event_blob_prefix):
-        blob_time = blob.last_modified
-        if latest_blob_time is None or blob_time > latest_blob_time:
-            latest_blob_time = blob_time
-
-    return latest_blob_time
-
-
-def get_latest_local_event_timestamp(event_dir_path):
-    """Get the latest modification timestamp of any file in the local event directory."""
-    latest_local_time = None
+def process_event_directories(local_directory, blob_directory, backup_directory, existing_event_files):
+    """Process event directories using Windows version strategy."""
+    if not os.path.exists(local_directory):
+        print(f"Events directory {local_directory} does not exist, skipping...")
+        return
     
-    for filename in os.listdir(event_dir_path):
-        file_path = os.path.join(event_dir_path, filename)
-        if os.path.isfile(file_path):
-            file_modified_time = datetime.datetime.fromtimestamp(
-                os.path.getmtime(file_path)
-            ).replace(tzinfo=timezone.utc)
-            
-            if latest_local_time is None or file_modified_time > latest_local_time:
-                latest_local_time = file_modified_time
+    os.makedirs(backup_directory, exist_ok=True)
     
-    return latest_local_time
-
-
-def find_new_event_directories(base_directory, connection_string, container_name, blob_directory):
-    """Find new or modified event directories to upload."""
-    new_events = []
-    
-    if not os.path.exists(base_directory):
-        print(f"Events directory {base_directory} does not exist, skipping...")
-        return new_events
-    
-    for event_dir in os.listdir(base_directory):
-        event_path = os.path.join(base_directory, event_dir)
-        if os.path.isdir(event_path):
-            event_name = os.path.basename(event_path)
-            
-            # Get latest timestamp from blob
-            latest_blob_time = get_latest_event_blob_timestamp(
-                connection_string, container_name, blob_directory, event_name
-            )
-            
-            # Get latest timestamp from local event directory
-            latest_local_time = get_latest_local_event_timestamp(event_path)
-            
-            # Upload if blob doesn't exist or local files are newer
-            if latest_blob_time is None or (latest_local_time and latest_local_time > latest_blob_time):
-                new_events.append(event_path)
-                print(f"Event '{event_name}' will be uploaded (local: {latest_local_time}, blob: {latest_blob_time})")
-            else:
-                print(f"Event '{event_name}' is up to date, skipping...")
-    
-    return new_events
-
-
-def upload_event_directory(event_dir_path, connection_string, container_name, blob_base_directory):
-    """Upload all files (images, txt, etc.) in an event directory."""
-    event_name = os.path.basename(event_dir_path)
-    uploaded_files = 0
-    
-    print(f"Uploading event directory: {event_name}")
-    
-    for filename in os.listdir(event_dir_path):
-        file_path = os.path.join(event_dir_path, filename)
-        if os.path.isfile(file_path):
-            blob_name = f"{blob_base_directory}{event_name}/{filename}"
-            upload_to_azure_blob(connection_string, container_name, blob_name, file_path)
-            uploaded_files += 1
-    
-    print(f"Uploaded {uploaded_files} files from event '{event_name}'")
+    for event_dir in os.listdir(local_directory):
+        event_path = os.path.join(local_directory, event_dir)
+        if not os.path.isdir(event_path):
+            continue
+        
+        event_name = os.path.basename(event_path)
+        existing_files_in_event = existing_event_files.get(event_name, set())
+        
+        # Check if any new files exist in this event directory
+        new_files_found = False
+        files_to_upload = []
+        
+        for filename in os.listdir(event_path):
+            file_path = os.path.join(event_path, filename)
+            if os.path.isfile(file_path) and filename not in existing_files_in_event:
+                files_to_upload.append((filename, file_path))
+                new_files_found = True
+        
+        if not new_files_found:
+            print(f"[{datetime.datetime.now()}] Skipping event '{event_name}' - all files already exist in blob")
+            continue
+        
+        # Upload new files
+        uploaded_files = 0
+        event_backup_dir = os.path.join(backup_directory, event_name)
+        os.makedirs(event_backup_dir, exist_ok=True)
+        
+        print(f"[{datetime.datetime.now()}] Processing event directory: {event_name}")
+        
+        for filename, file_path in files_to_upload:
+            blob_name = f"{blob_directory}{event_name}/{filename}"
+            try:
+                upload_to_azure_blob(
+                    AZURE_STORAGE_CONNECTION_STRING,
+                    CONTAINER_NAME,
+                    blob_name,
+                    file_path
+                )
+                # Move to backup folder
+                backup_file_path = os.path.join(event_backup_dir, filename)
+                shutil.move(file_path, backup_file_path)
+                uploaded_files += 1
+            except Exception as ex:
+                print(f"[{datetime.datetime.now()}] Failed to upload {file_path}: {ex}")
+        
+        print(f"[{datetime.datetime.now()}] Uploaded {uploaded_files} new files from event '{event_name}'")
+        
+        # If event directory is now empty, move it to backup
+        if not os.listdir(event_path):
+            try:
+                os.rmdir(event_path)
+                print(f"[{datetime.datetime.now()}] Removed empty event directory: {event_path}")
+            except OSError:
+                print(f"[{datetime.datetime.now()}] Could not remove event directory: {event_path}")
 
 
 def main():
     try:
+        print(f"[{datetime.datetime.now()}] Starting upload script...")
         print(f"Using location: {LOCATION}")
         print(f"CSV directory: {local_directory_csv}")
         print(f"Events directory: {local_directory_events}")
         
-        # Upload CSV files
-        new_csv_files = find_new_files(
-            local_directory_csv, ".csv", AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_directory_csv
+        # List existing blobs for CSV files
+        print(f"[{datetime.datetime.now()}] Checking existing CSV blobs...")
+        csv_blobs = list_existing_blobs(
+            AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_directory_csv
         )
-
-        if new_csv_files:
-            for file_path in new_csv_files:
-                blob_name = blob_directory_csv + os.path.basename(file_path)
-                upload_to_azure_blob(
-                    AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_name, file_path
-                )
-        else:
-            print("No new CSV files found to upload.")
-
-        # Upload Event directories
-        new_event_dirs = find_new_event_directories(
-            local_directory_events, AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_directory_events
+        print(f"[{datetime.datetime.now()}] Found {len(csv_blobs)} existing CSV files in blob")
+        
+        # List existing blobs for event directories
+        print(f"[{datetime.datetime.now()}] Checking existing event blobs...")
+        event_blobs = list_existing_event_blobs(
+            AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_directory_events
         )
-
-        if new_event_dirs:
-            for event_dir in new_event_dirs:
-                upload_event_directory(
-                    event_dir, AZURE_STORAGE_CONNECTION_STRING, CONTAINER_NAME, blob_directory_events
-                )
-        else:
-            print("No new event directories found to upload.")
-
+        print(f"[{datetime.datetime.now()}] Found {len(event_blobs)} existing event directories in blob")
+        
+        # Process CSV files
+        process_csv_files(
+            local_directory_csv, blob_directory_csv, backup_directory_csv, csv_blobs
+        )
+        
+        # Process Event directories
+        process_event_directories(
+            local_directory_events, blob_directory_events, backup_directory_events, event_blobs
+        )
+        
+        print(f"[{datetime.datetime.now()}] Upload script finished.")
+        
     except Exception as ex:
-        print(f"Error in main process: {ex}")
+        print(f"[{datetime.datetime.now()}] Error in main process: {ex}")
 
 
 if __name__ == "__main__":
