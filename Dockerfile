@@ -13,11 +13,25 @@ WORKDIR /app
 # Installiere Systemabhängigkeiten und bereinige anschließend
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
+    gnupg \
     libgl1-mesa-glx \
     libgtk2.0-dev \
 	dos2unix \
     pkg-config \
+    unixodbc-dev \
+    freetds-dev \
+    freetds-bin \
+    tdsodbc \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure FreeTDS ODBC driver
+RUN echo "[FreeTDS]" > /etc/odbcinst.ini \
+    && echo "Description = FreeTDS Driver" >> /etc/odbcinst.ini \
+    && echo "Driver = /usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so" >> /etc/odbcinst.ini \
+    && echo "Setup = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so" >> /etc/odbcinst.ini \
+    && echo "CPTimeout = " >> /etc/odbcinst.ini \
+    && echo "CPReuse = " >> /etc/odbcinst.ini
 
 # Kopiere Anwendungsdateien
 COPY requirements.txt .

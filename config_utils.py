@@ -522,15 +522,50 @@ def load_ocr_config(path: str = "config.ini") -> dict:
     return default_ocr_settings
 
 
-def load_commercial_licenses(path: str = "1.txt") -> set:
-    """Load commercial license numbers from a text file."""
+def load_commercial_licenses() -> set:
+    """Load commercial license numbers from Azure SQL Database."""
+    import pyodbc
+    
     plates = set()
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            plates = {ln.strip() for ln in f if ln.strip()}
-        print(f"Loaded {len(plates)} commercial licenses from {path}")
-    else:
-        print(f"Warning: {path} nicht gefunden. Identifizierung deaktiviert.")
+    try:
+        # Azure SQL Database connection string using FreeTDS
+        connection_string = (
+            "DRIVER={FreeTDS};"
+            "SERVER=wsv-phase3.database.windows.net;"
+            "PORT=1433;"
+            "DATABASE=WSV_phase3;"
+            "UID=wsvphase3;"
+            "PWD=Capgemini@123;"
+            "TDS_Version=8.0;"
+            "Encrypt=yes;"
+        )
+        
+        # Connect to the database
+        conn = pyodbc.connect(connection_string)
+        cursor = conn.cursor()
+        
+        # Query to get all license names from the Licenses table
+        query = "SELECT LicenseName FROM Licenses"
+        cursor.execute(query)
+        
+        # Fetch all results and add to set
+        for row in cursor.fetchall():
+            license_name = row[0]
+            if license_name:  # Skip null/empty values
+                plates.add(license_name.strip())
+        
+        cursor.close()
+        conn.close()
+        
+        print(f"Loaded {len(plates)} commercial licenses from Azure SQL Database")
+        
+    except pyodbc.Error as e:
+        print(f"Database error: {e}")
+        print("Commercial license checking disabled.")
+    except Exception as e:
+        print(f"Error loading commercial licenses: {e}")
+        print("Commercial license checking disabled.")
+    
     return plates
 
 
