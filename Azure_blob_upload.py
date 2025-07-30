@@ -11,7 +11,7 @@ from image_utils import sanitize_filename
 
 # Using Windows version Azure Storage Account Key
 AZURE_STORAGE_CONNECTION_STRING = (
-    "DefaultEndpointsProtocol=https;AccountName=wsv3storage;AccountKey=8ji24i7wR+wHkajFbtLYIJ/rVtvBnh64F0r4ECvVpitn0oHWEMZTkB0ou7JWijk46HZUmaB9d/o0+AStWtJ9oA==;EndpointSuffix=core.windows.net"
+    "XXXX"
 )
 CONTAINER_NAME = "wsv3"
 
